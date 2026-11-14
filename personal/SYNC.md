@@ -43,9 +43,13 @@ the tree before the merge, so an upstream change cannot alter its own audit.
 Read changes to `skills/omnigraph/` with care: that text becomes your agents'
 Omnigraph instructions after you export the skill.
 
-After you merge: pull locally (`git pull`) and, if a new release exists, run
-`personal/tools/update-cli.ps1` (verifies the download and runs the branch
-smoke test). Export the skill again only after you read its diff.
+After you merge: pull locally (`git pull`), then rebuild and test the fork's
+Windows binaries (`personal\tools\build-windows.ps1 -Install`; see
+`WINDOWS.md`). Export the skill again only after you read its diff.
+
+The fork changes four upstream source files for the Windows fix. An upstream
+change to the same lines makes the sync open a conflict issue instead of a PR.
+Resolve it by keeping both changes.
 
 ## Automatic merge (off)
 

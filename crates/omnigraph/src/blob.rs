@@ -749,7 +749,7 @@ impl NormalizedExternalUri {
     fn canonical_file_base(self) -> Result<Self> {
         let uri = self.uri();
         let path = file_path_from_normalized_uri(&uri)?;
-        let canonical = std::fs::canonicalize(&path).map_err(|error| {
+        let canonical = omnigraph_storage::canonicalize_path(&path).map_err(|error| {
             policy_error(format!(
                 "embedded file external Blob base must be an existing directory: {error}"
             ))
@@ -768,7 +768,7 @@ impl NormalizedExternalUri {
     fn canonical_file_input(self) -> Result<Self> {
         let uri = self.uri();
         let path = file_path_from_normalized_uri(&uri)?;
-        let canonical = std::fs::canonicalize(&path).map_err(|error| {
+        let canonical = omnigraph_storage::canonicalize_path(&path).map_err(|error| {
             OmniError::external_blob_source(
                 &uri,
                 format!("could not resolve external Blob file target: {error}"),
@@ -868,7 +868,7 @@ fn canonical_existing_prefix(absolute: &std::path::Path) -> Option<std::path::Pa
     let mut ancestor = absolute;
     let mut suffix = Vec::new();
     loop {
-        match std::fs::canonicalize(ancestor) {
+        match omnigraph_storage::canonicalize_path(ancestor) {
             Ok(mut canonical) => {
                 for component in suffix.iter().rev() {
                     canonical.push(component);

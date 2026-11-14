@@ -79,5 +79,5 @@ The same file twice is a `duplicate` and is not added again.
 
 - The app listens on 127.0.0.1 only. Other computers cannot reach it.
 - Requests over 200 MB are refused.
-- Upload and email write to `main` directly. On Windows with CLI 0.15.0, graph
-  branches do not work (see `../ONTOLOGY-AGENTS.md`).
+- Upload and email write `Document` nodes to `main` directly. Agents then work
+  on their own branches (see `../ONTOLOGY-AGENTS.md`).

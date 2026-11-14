@@ -66,10 +66,11 @@ pub(crate) fn canonical_storage_root(root: &str) -> Result<String, Diagnostic> {
         .map_err(|error| Diagnostic::error("storage_root_invalid", "storage", error.to_string()))?
     {
         StorageKind::Local => {
-            let path = std::fs::canonicalize(normalized.trim_start_matches("file://")).map_err(
-                |error| Diagnostic::error("storage_root_invalid", "storage", error.to_string()),
-            )?;
-            Ok(format!("file://{}", path.to_string_lossy()))
+            let path = omnigraph_storage::canonicalize_path(normalized.trim_start_matches("file://"))
+                .map_err(|error| {
+                    Diagnostic::error("storage_root_invalid", "storage", error.to_string())
+                })?;
+            Ok(omnigraph_storage::local_path_file_uri(&path))
         }
         _ => Ok(normalized),
     }
@@ -418,10 +419,10 @@ impl ClusterStore {
     /// This is metadata only; it does not reread the config or ledger.
     pub(crate) fn canonical_root(&self) -> Result<String, Diagnostic> {
         if self.kind() == StorageKind::Local {
-            let path = std::fs::canonicalize(&self.display_root).map_err(|err| {
+            let path = omnigraph_storage::canonicalize_path(&self.display_root).map_err(|err| {
                 Diagnostic::error("storage_root_invalid", "storage", err.to_string())
             })?;
-            Ok(format!("file://{}", path.to_string_lossy()))
+            Ok(omnigraph_storage::local_path_file_uri(&path))
         } else {
             Ok(self.root.clone())
         }

@@ -35,6 +35,67 @@ pub use read_through::{FrozenDirectory, ReadThroughMount, ReadThroughStore};
 
 pub type Result<T> = std::result::Result<T, StorageError>;
 
+/// `std::fs::canonicalize` without the Windows extended-length prefix.
+///
+/// On Windows, `canonicalize` returns verbatim paths (`\?\C:\x`,
+/// `\?\UNC\server\share\x`). Those spellings must not reach Lance or a
+/// `file://` URI: the `?` of the prefix is read as a URL query, so the root
+/// loses its path (`Invalid table location`, issue #907). On other platforms
+/// this is exactly `std::fs::canonicalize`.
+pub fn canonicalize_path(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path).map(simplify_verbatim_path)
+}
+
+/// Rewrites a Windows verbatim disk or UNC path to its ordinary spelling
+/// (`\?\C:\x` -> `C:\x`, `\?\UNC\srv\share\x` -> `\srv\share\x`). Paths
+/// that are not verbatim, and verbatim paths whose ordinary spelling would
+/// name something else (a `.` or `..` component), are returned unchanged.
+pub fn simplify_verbatim_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::Prefix;
+        let mut components = path.components();
+        let Some(Component::Prefix(prefix)) = components.next() else {
+            return path;
+        };
+        let rest: Vec<Component<'_>> = components.collect();
+        if rest
+            .iter()
+            .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+        {
+            return path;
+        }
+        let head = match prefix.kind() {
+            Prefix::VerbatimDisk(drive) => format!("{}:", drive as char),
+            Prefix::VerbatimUNC(server, share) => format!(
+                r"\\{}\{}",
+                server.to_string_lossy(),
+                share.to_string_lossy()
+            ),
+            _ => return path,
+        };
+        let mut simplified = PathBuf::from(head);
+        if rest.is_empty() {
+            simplified.push(r"\");
+        }
+        for component in rest {
+            simplified.push(component.as_os_str());
+        }
+        simplified
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
+}
+
+/// The cluster spelling of a local root: `file://` + the normalized path text
+/// (`file:///srv/x`, on Windows `file://C:/x`). URL parsers read the Windows
+/// form as drive `C:`, so it round-trips through `normalize_root_uri`.
+pub fn local_path_file_uri(path: &Path) -> String {
+    format!("file://{}", normalize_local_path(path))
+}
+
 /// The typed condition established at a storage-substrate boundary.
 ///
 /// This classifies the evidence carried by the failure. It does not say
@@ -2928,7 +2989,7 @@ pub fn write_queue_root_identity(normalized_root: &str) -> Result<String> {
     let mut suffix = Vec::new();
 
     loop {
-        if let Ok(canonical) = std::fs::canonicalize(ancestor) {
+        if let Ok(canonical) = canonicalize_path(ancestor) {
             let mut identity = canonical;
             for component in suffix.iter().rev() {
                 identity.push(component);
@@ -3015,7 +3076,7 @@ fn resolve_existing(path: &Path) -> PathBuf {
     let mut missing = Vec::new();
     let mut existing = path;
     loop {
-        if let Ok(resolved) = std::fs::canonicalize(existing) {
+        if let Ok(resolved) = canonicalize_path(existing) {
             return missing
                 .iter()
                 .rev()
@@ -3628,6 +3689,15 @@ fn required_remote_etag(action: &str, uri: &str, etag: Option<String>) -> Result
 
 fn normalize_local_path(path: &Path) -> String {
     let raw = path.as_os_str().to_string_lossy();
+    // Windows: one spelling per location. Without the verbatim prefix and with
+    // `/` separators, roots joined with `/` (graph and cluster layouts) compare
+    // equal to their canonical identities, and Lance reads them as paths.
+    #[cfg(windows)]
+    let raw = std::borrow::Cow::<str>::Owned(
+        simplify_verbatim_path(PathBuf::from(raw.as_ref()))
+            .to_string_lossy()
+            .replace('\\', "/"),
+    );
     if raw == "/" {
         return raw.to_string();
     }
@@ -6779,5 +6849,42 @@ mod tests {
             ),
             "got: {err}"
         );
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_verbatim_path_tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_disk_and_unc_paths_lose_their_prefix() {
+        assert_eq!(
+            simplify_verbatim_path(PathBuf::from(r"\\?\C:\graphs\g.omni")),
+            PathBuf::from(r"C:\graphs\g.omni")
+        );
+        assert_eq!(
+            simplify_verbatim_path(PathBuf::from(r"\\?\UNC\srv\share\g.omni")),
+            PathBuf::from(r"\\srv\share\g.omni")
+        );
+        assert_eq!(
+            simplify_verbatim_path(PathBuf::from(r"C:\plain")),
+            PathBuf::from(r"C:\plain")
+        );
+    }
+
+    #[test]
+    fn canonical_local_roots_and_file_uris_carry_no_query() {
+        let dir = std::env::temp_dir().join("omnigraph verbatim ? test");
+        let dir = PathBuf::from(dir.to_string_lossy().replace('?', "q"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let canonical = canonicalize_path(&dir).unwrap();
+        assert!(!canonical.to_string_lossy().starts_with(r"\\?\"));
+        let identity = write_queue_root_identity(&dir.join("g.omni").to_string_lossy()).unwrap();
+        assert!(!identity.starts_with(r"\\?\"), "{identity}");
+        assert!(!identity.contains('\\'), "one separator spelling: {identity}");
+        let uri = local_path_file_uri(&canonical);
+        let parsed = Url::parse(&uri).unwrap();
+        assert!(parsed.query().is_none(), "{uri}");
+        assert_eq!(parsed.to_file_path().unwrap(), canonical);
     }
 }

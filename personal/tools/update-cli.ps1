@@ -21,7 +21,10 @@
 #>
 param(
     [switch]$Install,
-    [string]$Tag = ""
+    [string]$Tag = "",
+    # Test (and with -Install, install) a local build instead of a release:
+    # the folder that holds omnigraph.exe, e.g. target\release
+    [string]$Binary = ""
 )
 $ErrorActionPreference = "Stop"
 $repo = "ModernRelay/omnigraph"
@@ -29,20 +32,26 @@ $binDir = Join-Path $env:USERPROFILE ".omnigraph\bin"
 $asset = "omnigraph-windows-x86_64"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$api = if ($Tag) { "https://api.github.com/repos/$repo/releases/tags/$Tag" } else { "https://api.github.com/repos/$repo/releases/latest" }
-$rel = Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "omnigraph-update-check" }
 $current = "none"
 $exe = Join-Path $binDir "omnigraph.exe"
 if (Test-Path $exe) { $current = ((& $exe version) | Select-Object -First 1) }
 Write-Host "installed: $current"
+$work = Join-Path $env:TEMP ("omnigraph-update-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+New-Item -ItemType Directory -Path $work | Out-Null
+
+if ($Binary) {
+    $new = (Resolve-Path $Binary).Path
+    $label = "local build $new"
+} else {
+$api = if ($Tag) { "https://api.github.com/repos/$repo/releases/tags/$Tag" } else { "https://api.github.com/repos/$repo/releases/latest" }
+$rel = Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "omnigraph-update-check" }
+$label = $rel.tag_name
 Write-Host "latest:    $($rel.tag_name) ($($rel.published_at))"
 
 $zipUrl = ($rel.assets | Where-Object { $_.name -eq "$asset.zip" }).browser_download_url
 $sumUrl = ($rel.assets | Where-Object { $_.name -eq "$asset.sha256" }).browser_download_url
 if (-not $zipUrl -or -not $sumUrl) { throw "release $($rel.tag_name) has no $asset.zip/.sha256" }
 
-$work = Join-Path $env:TEMP ("omnigraph-update-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
-New-Item -ItemType Directory -Path $work | Out-Null
 $zip = Join-Path $work "$asset.zip"
 Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -OutFile $zip
 $sumFile = Join-Path $work "$asset.sha256"
@@ -54,6 +63,7 @@ Write-Host "sha256 OK: $actual"
 
 $new = Join-Path $work "bin"
 Expand-Archive -Path $zip -DestinationPath $new
+}
 $og = Join-Path $new "omnigraph.exe"
 Write-Host ("new binary: " + ((& $og version) | Select-Object -First 1))
 
@@ -82,7 +92,17 @@ $core = (Step "init" { & $og init --schema (Join-Path $t "s.pg") $g }) -and
 $branches = $core -and
         (Step "branch create" { & $og branch create smoke --target $g }) -and
         (Step "load on branch" { & $og load --data (Join-Path $t "b.jsonl") --mode merge --branch smoke --target $g }) -and
+        (Step "branch diff" { & $og branch diff smoke --target $g }) -and
         (Step "branch merge" { & $og branch merge smoke --into main --target $g })
+if ($branches) {
+    $ErrorActionPreference = "Continue"
+    $rows = (& $og query notes --query (Join-Path $t "q.gq") --format json --target $g 2>$null) | Out-String
+    $ErrorActionPreference = "Stop"
+    $merged = $rows -match '"slug":"b"'
+    $mergedLabel = "FAIL"; if ($merged) { $mergedLabel = "ok" }
+    Write-Host ("  {0,-28} {1}" -f "merged row visible on main", $mergedLabel)
+    $branches = $merged
+}
 Write-Host ""
 if (-not $core) { Write-Host "RESULT: core operations FAILED. Do not install."; exit 2 }
 if ($branches) { Write-Host "RESULT: core ok, graph branches WORK on this machine. Agents may switch to branches (personal/ONTOLOGY-AGENTS.md)." }
@@ -98,7 +118,7 @@ if ($Install) {
     }
     New-Item -ItemType Directory -Path $binDir | Out-Null
     Copy-Item (Join-Path $new "*.exe") $binDir
-    Write-Host "installed $($rel.tag_name) into $binDir"
+    Write-Host "installed $label into $binDir"
     Write-Host "Next: read the release notes, then refresh the agent skill:"
     Write-Host "  omnigraph skill export `"$env:USERPROFILE\.claude\skills\omnigraph`" --force"
 } else {

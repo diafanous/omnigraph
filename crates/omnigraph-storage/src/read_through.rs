@@ -918,6 +918,8 @@ mod tests {
         );
     }
 
+    // Creating symlinks needs `std::os::unix`; Windows needs privileges for them.
+    #[cfg(unix)]
     #[tokio::test]
     async fn open_refuses_a_symlink_anywhere_under_the_root() {
         let dir = tempfile::tempdir().unwrap();
