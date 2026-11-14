@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "17 13 * * 1" # Mondays 13:17 UTC (08:17 or 09:17 New York)
   workflow_dispatch:
+    inputs:
+      audit_only_base:
+        description: "Optional: audit BASE..upstream/main only (a tag or sha), no merge or PR"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -49,7 +54,22 @@ jobs:
           tar xzf gl.tgz gitleaks && install -m 0755 gitleaks bin/gitleaks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
+      - name: Audit a past range only (manual test)
+        if: ${{ inputs.audit_only_base }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ inputs.audit_only_base }}
+        run: |
+          git remote add upstream https://github.com/ModernRelay/omnigraph.git
+          git fetch --quiet --tags upstream main
+          cp -r personal/sync "$RUNNER_TEMP/sync"
+          git checkout --quiet --detach upstream/main
+          python3 "$RUNNER_TEMP/sync/audit.py" --base "$BASE" --head upstream/main \
+            --worktree . --out "$RUNNER_TEMP/audit" || true
+          cat "$RUNNER_TEMP/audit/audit.md" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Merge, audit and open the pull request
+        if: ${{ !inputs.audit_only_base }}
         env:
           GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
           HAS_SYNC_TOKEN: ${{ secrets.SYNC_TOKEN != '' }}
