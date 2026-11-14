@@ -1,0 +1,31 @@
+# Keeps upstream's own workflows (CI, release, publish, nightly jobs) disabled
+# in this fork, so only the personal-* workflows run here. Runs after every
+# push to main, which includes every merged upstream sync. See personal/SYNC.md.
+name: personal-fork-guard
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  guard:
+    if: github.repository_owner != 'ModernRelay'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Disable every workflow that is not personal-*
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/actions/workflows" \
+            --jq '.workflows[] | select(.state == "active") | select(.path | startswith(".github/workflows/personal-") | not) | "\(.id)\t\(.path)"' |
+          while IFS=$'\t' read -r id path; do
+            echo "disabling $path"
+            gh api -X PUT "repos/$REPO/actions/workflows/$id/disable"
+          done

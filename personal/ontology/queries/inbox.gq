@@ -1,0 +1,84 @@
+// Stored queries for the inbox and the starter ontology layer.
+
+query recent_documents() {
+  match {
+    $d: Document
+  }
+  return { $d.slug as slug, $d.title as title, $d.channel as channel, $d.sender as sender, $d.received_at as received_at }
+  order { received_at desc }
+  limit 50
+}
+
+query document_text($slug: String) {
+  match {
+    $d: Document { slug: $slug }
+  }
+  return { $d.slug as slug, $d.title as title, $d.media_type as media_type, $d.text as text }
+}
+
+query concepts_in_document($slug: String) {
+  match {
+    $d: Document { slug: $slug }
+    $d mentions $c
+  }
+  return { $c.slug as slug, $c.name as name, $c.kind as kind }
+  order { name asc }
+}
+
+query documents_for_concept($slug: String) {
+  match {
+    $c: Concept { slug: $slug }
+    $d mentions $c
+  }
+  return { $d.slug as slug, $d.title as title }
+  order { title asc }
+}
+
+// Full-text search over document text (BM25, most relevant first).
+query search_documents($q: String) {
+  match {
+    $d: Document
+  }
+  return { $d.slug as slug, $d.title as title, bm25($d.text, $q) as score }
+  order { bm25($d.text, $q) desc }
+  limit 20
+}
+
+// Find existing concepts before creating a new one (avoid duplicates).
+query search_concepts($q: String) {
+  match {
+    $c: Concept
+  }
+  return { $c.slug as slug, $c.name as name, $c.kind as kind, bm25($c.name, $q) as score }
+  order { bm25($c.name, $q) desc }
+  limit 20
+}
+
+query concepts_by_kind($kind: String) {
+  match {
+    $c: Concept { kind: $kind }
+  }
+  return { $c.slug as slug, $c.name as name, $c.summary as summary }
+  order { name asc }
+  limit 500
+}
+
+query concept_relations($slug: String) {
+  match {
+    $a: Concept { slug: $slug }
+    $a $r:relatesTo $b
+  }
+  return { $b.slug as target, $b.name as name, $r.relation as relation, $r.evidence as evidence }
+  order { name asc }
+}
+
+// Documents that no concept points to yet: the agents' work queue.
+query unprocessed_documents() {
+  match {
+    $d: Document
+    not { $d mentions $c }
+  }
+  return { $d.slug as slug, $d.title as title, $d.channel as channel, $d.received_at as received_at }
+  order { received_at asc }
+  limit 100
+}

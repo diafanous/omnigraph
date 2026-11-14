@@ -1,0 +1,37 @@
+// Base ontology for the personal knowledge graph.
+// Document: one uploaded file or email (the raw evidence).
+// Concept + Mentions + RelatesTo: a generic starter layer that agents use
+// before a kind of thing earns its own typed node (see personal/ONTOLOGY-AGENTS.md).
+
+node Document {
+  slug: String @key
+  title: String
+  filename: String
+  media_type: String
+  size_bytes: I64
+  sha256: String @unique
+  channel: enum(app, email)
+  sender: String?
+  subject: String?
+  received_at: DateTime
+  note: String?
+  text: String? @index
+  content: Blob?
+}
+
+node Concept {
+  slug: String @key
+  name: String @index
+  kind: String
+  summary: String?
+}
+
+edge Mentions: Document -> Concept {
+  note: String?
+  @unique(@src, @dst)
+}
+
+edge RelatesTo: Concept -> Concept {
+  relation: String
+  evidence: String?
+}
