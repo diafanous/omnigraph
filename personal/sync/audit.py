@@ -257,7 +257,9 @@ def check_gitleaks(rep: Report, repo: Path, out_dir: Path) -> None:
         rep.findings.append(Finding("info", "gitleaks", "not run on this machine; CI runs it"))
         return
     report = out_dir / "gitleaks.json"
-    res = run([exe, "git", str(repo), f"--log-opts={rep.base}..{rep.head}", "--no-banner",
+    config = Path(__file__).resolve().with_name("gitleaks.toml")  # reviewed exemptions
+    extra = ["--config", str(config)] if config.exists() else []
+    res = run([exe, "git", str(repo), *extra, f"--log-opts={rep.base}..{rep.head}", "--no-banner",
                "--report-format", "json", "--report-path", str(report), "--exit-code", "0",
                "--redact"], repo, check=False)
     if res.returncode != 0:

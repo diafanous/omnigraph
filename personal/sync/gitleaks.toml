@@ -1,0 +1,11 @@
+# gitleaks rules for the upstream audit: the default rules plus reviewed exemptions.
+# Each exemption must name exactly what it allows and why. Keep this list short.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Release-notes metadata: SHA-256 digests of changelog fragment files (reviewed 2026-11-14, upstream docs/releases/v0.15.0.md)"
+condition = "AND"
+paths = ['''^docs/releases/[^/]+\.md$''']
+regexTarget = "match"
+regexes = ['''\.md":"[0-9a-f]{64}''']
